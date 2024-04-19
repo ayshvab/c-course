@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -26,42 +27,6 @@ struct buffer {
   ssize_t len;
   ssize_t cap;
 };
-
-/* struct find_pattern_result { */
-/*   isize index; */
-/*   b32 found; */
-/* }; */
-
-/* struct find_pattern_result find_pattern(u8 *text, isize text_len, u8 *pattern, */
-/*                                  isize pattern_len) { */
-/*   struct find_pattern_result result = {0}; */
-/*   isize text_i = 0; */
-/*   isize pattern_j = 0; */
-/*   if (text_len == 0) { */
-/*     result.found = 0; */
-/*     return result; */
-/*   } */
-/*   if (pattern_len == 0) { */
-/*     result.index = 0; */
-/*     result.found = 1; */
-/*     return result; */
-/*   } */
-
-/*   while (1) { */
-/*     if (text_i <= (text_len - pattern_len) && (pattern_j < pattern_len) && */
-/*         (pattern[pattern_j] == text[text_i + pattern_j])) { */
-/*       pattern_j++; */
-/*     } else if (text_i <= (text_len - pattern_len) && (pattern_j < pattern_len)) { */
-/*       pattern_j = 0; */
-/*       text_i++; */
-/*     } else */
-/*       break; */
-/*   } */
-
-/*   result.index = text_i; */
-/*   result.found = pattern_j >= pattern_len; */
-/*   return result; */
-/* } */
 
 u16 read16le(u8* data) {
   u16 result = (u16)data[1];
@@ -93,9 +58,8 @@ struct eocdr {
   u32 cd_size;         /* Central Directory size in bytes. */
   u32 cd_offset;       /* Central Directory file offset. */
   u16 comment_len;     /* Archive comment length. */
-  const u8 *comment;   /* Archive comment. */
+  u8 *comment;   /* Archive comment. */
 };
-
 
 /* Size of the End of Central Directory Record, not including comment. */
 #define EOCDR_BASE_SZ 22
@@ -103,16 +67,18 @@ struct eocdr {
 
 b32 read_eocdr(struct eocdr *eocdr, u8 *data, isize len) {
   assert(len >= EOCDR_BASE_SZ);
-  u8 *at = data+(len-EOCDR_BASE_SZ);
+  u8 *at = &data[len-EOCDR_BASE_SZ];
   u32 maybe_signature = 0;
-  isize comment_len = 0;
+  u16 comment_len = 0;
   for (;;) {
     maybe_signature = read32le(at);
     if (maybe_signature == EOCDR_SIGNATURE) break;
     if (at == data) return 0;
+    if (comment_len == UINT16_MAX) break;
     at--;
     comment_len++;
   }
+  assert(comment_len < UINT16_MAX);
   eocdr->signature = READ32(at);
   eocdr->disk_nbr = READ16(at);
   eocdr->cd_start_disk = READ16(at);
@@ -120,9 +86,74 @@ b32 read_eocdr(struct eocdr *eocdr, u8 *data, isize len) {
   eocdr->cd_entries = READ16(at);
   eocdr->cd_size = READ32(at);
   eocdr->cd_offset = READ32(at);
-  eocdr->comment_len = comment_len;
+  eocdr->comment_len = READ16(at);
   eocdr->comment = at;
+  assert(at = &data[len-comment_len]);
+  assert(comment_len == eocdr->comment_len);
   return 1;
+}
+
+#define FILE_HEADER_SIGNATURE 0x02014b50
+
+struct file_header {
+  u32 signature;
+  u16 version_made_by;
+  u16 version_needed_to_extract;
+  u16 general_purpose_bit_flag;
+  u16 compression_method;
+  u16 last_mod_file_time;
+  u16 last_mod_file_date;
+  u32 crc32;
+  u32 compressed_size;
+  u32 uncompressed_size;
+  u16 filename_len;
+  u16 extra_field_len;
+  u16 file_comment_len;
+  u16 disk_number_start;
+  u16 internal_file_attributes;
+  u32 external_file_attributes;
+  u32 relative_offset_of_local_header;
+  u8* filename;
+  u8* extra_field;
+  u8* file_comment;
+};
+
+b32 read_file_header(struct file_header *file_header, u8 **beg, u8 *end) {
+  u8 *at = *beg;
+  b32 found = 0;
+  for (;;) {
+    if (at == end) break;
+    found = read32le(at) == FILE_HEADER_SIGNATURE;
+    if (found) break;
+    at++;
+  }
+  if (found) {
+    file_header->signature = READ32(at);
+    file_header->version_made_by = READ16(at);
+    file_header->version_needed_to_extract = READ16(at);
+    file_header->general_purpose_bit_flag = READ16(at);
+    file_header->compression_method = READ16(at);
+    file_header->last_mod_file_time = READ16(at);
+    file_header->last_mod_file_date = READ16(at);
+    file_header->crc32 = READ32(at);
+    file_header->compressed_size = READ32(at);
+    file_header->uncompressed_size = READ32(at);
+    file_header->filename_len = READ16(at);
+    file_header->extra_field_len = READ16(at);
+    file_header->file_comment_len = READ16(at);
+    file_header->disk_number_start = READ16(at);
+    file_header->internal_file_attributes = READ16(at);
+    file_header->external_file_attributes = READ32(at);
+    file_header->relative_offset_of_local_header = READ32(at);
+    file_header->filename = at;
+    at += file_header->filename_len;
+    file_header->extra_field = at;
+    at += file_header->extra_field_len;
+    file_header->file_comment = at;
+    at += file_header->file_comment_len;
+  }
+  *beg = at;
+  return found;
 }
 
 int main(int argc, char **argv) {  
@@ -164,8 +195,21 @@ int main(int argc, char **argv) {
 
   printf("Given file is 'rarjpeg'.\n");
 
- cleanup:
+  struct file_header file_header = {0};
+  u8 *beg = buffer.data;
+  /* u8 *end = &buffer.data[eocdr.cd_offset]; */
+  u8* end = &buffer.data[buffer.len];
+  for(;;) {
+    b32 found = read_file_header(&file_header, &beg, end);
+    /* printf("found=%d\n", found); */
+    if (!found) break;
+    printf("%.*s\n", file_header.filename_len, file_header.filename);
+    memset(&file_header, 0, sizeof(struct file_header));
+  }
+
+cleanup:
   fclose(file);
   free(buffer.data);
   return 0;
 }
+
