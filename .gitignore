@@ -1,0 +1,37 @@
+# Ignore all
+*
+
+# Unignore all dirs
+!*/
+
+# Unignore all with extensions
+!*.*
+
+# Unignore .gitignore file
+!.gitignore
+
+# Executables
+*.exe
+
+# Ignore object files
+*.o
+
+*.out
+
+# vscode files
+.vscode
+
+# eclipse files
+.cproject
+.project
+.classpath
+.settings
+
+# perf output
+perf.data*
+
+# maven output
+target
+
+# mac garbage
+.DS_Store
