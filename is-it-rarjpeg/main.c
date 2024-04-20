@@ -69,7 +69,7 @@ b32 read_eocdr(struct eocdr *eocdr, u8 *data, isize len) {
   assert(len >= EOCDR_BASE_SZ);
   u8 *at = &data[len-EOCDR_BASE_SZ];
   u32 maybe_signature = 0;
-  u16 comment_len = 0;
+  isize comment_len = 0;
   for (;;) {
     maybe_signature = read32le(at);
     if (maybe_signature == EOCDR_SIGNATURE) break;
@@ -78,7 +78,9 @@ b32 read_eocdr(struct eocdr *eocdr, u8 *data, isize len) {
     at--;
     comment_len++;
   }
-  assert(comment_len < UINT16_MAX);
+  if (comment_len > UINT16_MAX) {
+    return 0;
+  }
   eocdr->signature = READ32(at);
   eocdr->disk_nbr = READ16(at);
   eocdr->cd_start_disk = READ16(at);
@@ -88,8 +90,13 @@ b32 read_eocdr(struct eocdr *eocdr, u8 *data, isize len) {
   eocdr->cd_offset = READ32(at);
   eocdr->comment_len = READ16(at);
   eocdr->comment = at;
-  assert(at = &data[len-comment_len]);
-  assert(comment_len == eocdr->comment_len);
+  if (at != &data[len-comment_len]) {
+    return 0;
+
+  }
+  if (comment_len != eocdr->comment_len) {
+    return 0;
+  }
   return 1;
 }
 
@@ -156,60 +163,63 @@ b32 read_file_header(struct file_header *file_header, u8 **beg, u8 *end) {
   return found;
 }
 
-int main(int argc, char **argv) {  
-  if (argc == 1) {
-    printf("Usage: is-it-rarjpeg file.jpg\n");
-    return 0;
-  }
-
-  FILE *file = fopen(argv[1], "rb");
-
-  if (file == NULL) {
-    printf("Fail to open file %s\n", argv[1]);
-    return 1;
-  }
-
+void app_run(isize memory_capacity, char **filenames, isize filenames_len) {
   struct buffer buffer = {0};
-  buffer.cap = 4*GB;
+  buffer.cap = memory_capacity;
   buffer.data = malloc(buffer.cap);
   if (buffer.data == NULL) {
     perror("malloc");
-    goto cleanup;
+    exit(1);
   }
-  
-  size_t bytes_read = 0;
-  while ((bytes_read = fread(buffer.data+buffer.len, 1, buffer.cap-buffer.len, file)) > 0) {
-    buffer.len += bytes_read;
-    if (ferror(file)) {
-      perror("fread");
-      goto cleanup;
+
+  for (isize i=0; i<filenames_len; i++) {
+    buffer.len = 0;
+    printf("====== Filename: %s\n", filenames[i]);
+
+    FILE *file = fopen(filenames[i], "rb");
+    if (file == NULL) {
+      perror("fopen");
+      exit(1);
     }
+    
+    size_t bytes_read = 0;
+    while ((bytes_read = fread(buffer.data+buffer.len, 1, buffer.cap-buffer.len, file)) > 0) {
+      if (ferror(file)) {
+        perror("fread");
+        exit(1);
+      }
+      buffer.len += bytes_read;
+    }
+
+    struct eocdr eocdr = {0};
+    b32 ok = read_eocdr(&eocdr, buffer.data, buffer.len);
+    if (!ok) {
+      printf("This file is not a 'rarjpeg'.\n");
+      continue;
+    }
+    printf("This file is a 'rarjpeg'.\n");
+
+    printf("=== Archive filenames list start\n");
+    struct file_header file_header = {0};
+    u8 *beg = buffer.data;
+    /* u8 *end = &buffer.data[eocdr.cd_offset]; */
+    u8* end = &buffer.data[buffer.len];
+    for(;;) {
+      b32 found = read_file_header(&file_header, &beg, end);
+      if (!found) break;
+      printf("%.*s\n", file_header.filename_len, file_header.filename);
+      memset(&file_header, 0, sizeof(struct file_header));
+    }
+    printf("=== Archive filenames list end\n");
   }
+}
 
-  struct eocdr eocdr = {0};
-  b32 ok = read_eocdr(&eocdr, buffer.data, buffer.len);
-  if (!ok) {
-    printf("Given file is not 'rarjpeg'.\n");
-    goto cleanup;
+int main(int argc, char **argv) {  
+  if (argc == 1) {
+    printf("Usage: is-it-rarjpeg filename0 [filename1]\n");
+    return 0;
   }
-
-  printf("Given file is 'rarjpeg'.\n");
-
-  struct file_header file_header = {0};
-  u8 *beg = buffer.data;
-  /* u8 *end = &buffer.data[eocdr.cd_offset]; */
-  u8* end = &buffer.data[buffer.len];
-  for(;;) {
-    b32 found = read_file_header(&file_header, &beg, end);
-    /* printf("found=%d\n", found); */
-    if (!found) break;
-    printf("%.*s\n", file_header.filename_len, file_header.filename);
-    memset(&file_header, 0, sizeof(struct file_header));
-  }
-
-cleanup:
-  fclose(file);
-  free(buffer.data);
+  app_run(4*GB, &argv[1], argc-1);
   return 0;
 }
 
