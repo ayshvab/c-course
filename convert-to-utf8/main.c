@@ -111,7 +111,6 @@ isize utf8_from(enum encoding encoding, u8 *src, isize src_len, u8 *dest) {
 
   isize dest_len = 0;
   for (isize i = 0; i < src_len; i++) {
-//    assert(src[i] < table_len);
     if (src[i] >= table_len) {
       printf("[ERROR]: invalid codepoint for this encoding\n");
       exit(-1);
@@ -157,13 +156,6 @@ void app_run(isize memory_capacity, enum encoding source_encoding, char *source_
 
   u8 *output_buffer = &buffer.data[buffer.len];
   isize output_buffer_len = 0;
-  /* if (source_encoding == encoding_cp1251) { */
-  /*   output_buffer_len = utf8_from_cp1251(buffer.data, buffer.len, output_buffer); */
-  /* } else if (source_encoding == encoding_iso_8859_5) { */
-  /*   output_buffer_len = utf8_from_iso_8859_5(buffer.data, buffer.len, output_buffer); */
-  /* } else if (source_encoding == encoding_koi8) { */
-  /*   output_buffer_len = utf8_from_koi8(buffer.data, buffer.len, output_buffer); */
-  /* } */
   if (source_encoding == encoding_cp1251) {
     output_buffer_len = utf8_from(encoding_cp1251, buffer.data, buffer.len, output_buffer);
   } else if (source_encoding == encoding_iso_8859_5) {
