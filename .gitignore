@@ -10,6 +10,8 @@
 # Unignore .gitignore file
 !.gitignore
 
+!Makefile
+
 # Executables
 *.exe
 
