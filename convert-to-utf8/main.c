@@ -57,21 +57,6 @@ u32 cp1251_to_unicode_table[] = {
   0x0441, 0x0442, 0x0443, 0x0444, 0x0445, 0x0446, 0x0447, 0x0448, 0x0449, 0x044A, 0x044B, 0x044C, 0x044D, 0x044E, 0x044F,
 };
 
-isize utf8_from_cp1251(u8 *src, isize src_len, u8 *dest) {
-  isize dest_len = 0;
-  for (isize i = 0; i < src_len; i++) {
-    u32 codepoint = cp1251_to_unicode_table[src[i]];
-    if (codepoint < 0x80) {
-      dest[dest_len] = src[i];
-      dest_len++;
-    } else {
-      dest[dest_len++] = 0xC0 | ((codepoint >> 6) & 0x1F);
-      dest[dest_len++] = 0x80 | (codepoint & 0x3F);
-    }
-  }
-  return dest_len;
-}
-
 u32 koi8_to_unicode_table[] = {
  0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F,
  0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F,
@@ -90,20 +75,6 @@ u32 koi8_to_unicode_table[] = {
  0x042E, 0x0410, 0x0411, 0x0426, 0x0414, 0x0415, 0x0424, 0x0413, 0x0425, 0x0418, 0x0419, 0x041A, 0x041B, 0x041C, 0x041D, 0x041E,
  0x041F, 0x042F, 0x0420, 0x0421, 0x0422, 0x0423, 0x0416, 0x0412, 0x042C, 0x042B, 0x0417, 0x0428, 0x042D, 0x0429, 0x0427, 0x042A,
 };
-
-isize utf8_from_koi8(u8 *src, isize src_len, u8 *dest) {
-  isize dest_len = 0;
-  for (isize i = 0; i < src_len; i++) {
-    u32 codepoint = koi8_to_unicode_table[src[i]];
-    if (codepoint < 0x7F) {
-      dest[dest_len++] = codepoint;
-    } else {
-      dest[dest_len++] = 0xC0 | ((codepoint >> 6) & 0x1F);
-      dest[dest_len++] = 0x80 | (codepoint & 0x3F);
-    }
-  }
-  return dest_len;
-}
 
 u32 iso_8859_5_to_unicode_table[] = {
   0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x000E, 0x000F,
@@ -124,15 +95,40 @@ u32 iso_8859_5_to_unicode_table[] = {
   0x2116, 0x0451, 0x0452, 0x0453, 0x0454, 0x0455, 0x0456, 0x0457, 0x0458, 0x0459, 0x045A, 0x045B, 0x045C, 0x00A7, 0x045E, 0x045F,
 };
 
-isize utf8_from_iso_8859_5(u8 *src, isize src_len, u8 *dest) {
+isize utf8_from(enum encoding encoding, u8 *src, isize src_len, u8 *dest) {
+  u32 *table = NULL;
+  isize table_len = 0;
+  if (encoding == encoding_cp1251) {
+    table = cp1251_to_unicode_table;
+    table_len = array_len(cp1251_to_unicode_table);
+  } else if (encoding == encoding_koi8) {
+    table = koi8_to_unicode_table;
+    table_len = array_len(koi8_to_unicode_table);
+  } else if (encoding == encoding_iso_8859_5) {
+    table = iso_8859_5_to_unicode_table;
+    table_len = array_len(iso_8859_5_to_unicode_table);
+  }
+
   isize dest_len = 0;
   for (isize i = 0; i < src_len; i++) {
-    u32 codepoint = iso_8859_5_to_unicode_table[src[i]];
+//    assert(src[i] < table_len);
+    if (src[i] >= table_len) {
+      printf("[ERROR]: invalid codepoint for this encoding\n");
+      exit(-1);
+    }
+    u32 codepoint = table[src[i]];
     if (codepoint < 0x80) {
-      dest[dest_len++] = codepoint;
+      dest[dest_len] = src[i];
+      dest_len++;
+    } else if (codepoint < 0x800) {
+      u8 byte = 0xC0 | ((0x7 & (codepoint >> 8)) << 2);
+      byte |= 0x3 & (codepoint >> 6);
+      dest[dest_len++] = byte;
+      byte = 0x80 | ((0x3 & (codepoint >> 4)) << 4);
+      byte |= (0xF & codepoint);
+      dest[dest_len++] = byte;
     } else {
-      dest[dest_len++] = 0xC0 | ((codepoint >> 6) & 0x1F);
-      dest[dest_len++] = 0x80 | (codepoint & 0x3F);
+      assert(0);
     }
   }
   return dest_len;
@@ -161,14 +157,21 @@ void app_run(isize memory_capacity, enum encoding source_encoding, char *source_
 
   u8 *output_buffer = &buffer.data[buffer.len];
   isize output_buffer_len = 0;
+  /* if (source_encoding == encoding_cp1251) { */
+  /*   output_buffer_len = utf8_from_cp1251(buffer.data, buffer.len, output_buffer); */
+  /* } else if (source_encoding == encoding_iso_8859_5) { */
+  /*   output_buffer_len = utf8_from_iso_8859_5(buffer.data, buffer.len, output_buffer); */
+  /* } else if (source_encoding == encoding_koi8) { */
+  /*   output_buffer_len = utf8_from_koi8(buffer.data, buffer.len, output_buffer); */
+  /* } */
   if (source_encoding == encoding_cp1251) {
-    output_buffer_len = utf8_from_cp1251(buffer.data, buffer.len, output_buffer);
+    output_buffer_len = utf8_from(encoding_cp1251, buffer.data, buffer.len, output_buffer);
   } else if (source_encoding == encoding_iso_8859_5) {
-    output_buffer_len = utf8_from_iso_8859_5(buffer.data, buffer.len, output_buffer);
+    output_buffer_len = utf8_from(encoding_iso_8859_5, buffer.data, buffer.len, output_buffer);
   } else if (source_encoding == encoding_koi8) {
-    output_buffer_len = utf8_from_koi8(buffer.data, buffer.len, output_buffer);
+    output_buffer_len = utf8_from(encoding_koi8, buffer.data, buffer.len, output_buffer);
   }
-
+  
   if (output_buffer_len == 0) {
     return;
   };
