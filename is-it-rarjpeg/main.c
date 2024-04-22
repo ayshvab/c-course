@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -12,13 +13,11 @@ typedef uint32_t u32;
 typedef int32_t b32;
 typedef ssize_t isize;
 
-#define array_len(a)  (isize)(sizeof(a) / sizeof(a[0]))
-#define cstr_len(s) (isize)(sizeof(s)-1)
-#define handle_error()                          \
-    ({                                          \
-        printf("Error %s\n", strerror(errno));  \
-        exit(-1);                               \
-  })
+#define handle_error() \
+  do { \
+    printf("Error %s\n", strerror(errno)); \
+    exit(-1); \
+  } while (0)
 
 #define GB (1L * 1024 * 1024 * 1024)
 
@@ -168,8 +167,7 @@ void app_run(isize memory_capacity, char **filenames, isize filenames_len) {
   buffer.cap = memory_capacity;
   buffer.data = malloc(buffer.cap);
   if (buffer.data == NULL) {
-    perror("malloc");
-    exit(1);
+    handle_error();
   }
 
   for (isize i=0; i<filenames_len; i++) {
@@ -178,15 +176,13 @@ void app_run(isize memory_capacity, char **filenames, isize filenames_len) {
 
     FILE *file = fopen(filenames[i], "rb");
     if (file == NULL) {
-      perror("fopen");
-      exit(1);
+      handle_error();
     }
     
     size_t bytes_read = 0;
     while ((bytes_read = fread(buffer.data+buffer.len, 1, buffer.cap-buffer.len, file)) > 0) {
       if (ferror(file)) {
-        perror("fread");
-        exit(1);
+        handle_error();
       }
       buffer.len += bytes_read;
     }

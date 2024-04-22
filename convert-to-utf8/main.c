@@ -14,7 +14,6 @@ typedef int32_t b32;
 typedef ssize_t isize;
 
 #define array_len(a)  (isize)(sizeof(a) / sizeof(a[0]))
-#define cstr_len(s) (isize)(sizeof(s)-1)
 #define handle_error() \
   do { \
     printf("Error %s\n", strerror(errno)); \
